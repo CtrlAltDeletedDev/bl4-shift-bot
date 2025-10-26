@@ -90,6 +90,63 @@ class ShiftCodeBot(commands.Bot):
 bot = ShiftCodeBot()
 
 
+# Pagination View for code embeds
+class CodePaginationView(discord.ui.View):
+    """Pagination view for browsing through multiple code embeds"""
+    
+    def __init__(self, embeds: list[discord.Embed], timeout: float = 180):
+        super().__init__(timeout=timeout)
+        self.embeds = embeds
+        self.current_page = 0
+        self.max_pages = len(embeds)
+        
+        # Disable buttons if only one page
+        if self.max_pages <= 1:
+            self.previous_button.disabled = True
+            self.next_button.disabled = True
+            self.first_button.disabled = True
+            self.last_button.disabled = True
+        else:
+            self.previous_button.disabled = True
+            self.first_button.disabled = True
+    
+    def update_buttons(self):
+        """Update button states based on current page"""
+        self.first_button.disabled = self.current_page == 0
+        self.previous_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page >= self.max_pages - 1
+        self.last_button.disabled = self.current_page >= self.max_pages - 1
+    
+    @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.blurple)
+    async def first_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = 0
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+    
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.blurple)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = max(0, self.current_page - 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+    
+    @discord.ui.button(label="▶️ Next", style=discord.ButtonStyle.blurple)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = min(self.max_pages - 1, self.current_page + 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+    
+    @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.blurple)
+    async def last_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = self.max_pages - 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
+    
+    async def on_timeout(self):
+        """Disable buttons when view times out"""
+        for item in self.children:
+            item.disabled = True
+
+
 @bot.event
 async def on_ready():
     """Called when the bot is ready"""
@@ -99,7 +156,7 @@ async def on_ready():
 
 @bot.tree.command(name="codes", description="Get all available Borderlands 4 Shift codes")
 async def get_codes(interaction: discord.Interaction):
-    """Slash command to get all Shift codes"""
+    """Slash command to get all Shift codes with pagination"""
     await interaction.response.defer(thinking=True)
     
     try:
@@ -127,34 +184,53 @@ async def get_codes(interaction: discord.Interaction):
             await interaction.followup.send(embed=embed)
             return
         
-        # Create embeds for each code (Discord limits to 10 embeds per message)
+        # Create paginated embeds (max 10 codes per page due to field limits)
         embeds = []
-        for i, code in enumerate(codes[:10]):  # Limit to 10 codes
+        codes_per_page = 10
+        total_pages = (len(codes) + codes_per_page - 1) // codes_per_page  # Ceiling division
+        
+        for page in range(total_pages):
+            start_idx = page * codes_per_page
+            end_idx = min(start_idx + codes_per_page, len(codes))
+            page_codes = codes[start_idx:end_idx]
+            
+            # Create embed for this page
             embed = discord.Embed(
-                title=f"🎮 Shift Code #{i+1}",
+                title=f"🎮 Borderlands 4 Shift Codes",
+                description=f"Page {page + 1} of {total_pages} • Total Codes: {len(codes)}",
                 color=discord.Color.gold()
             )
-            embed.add_field(name="Code", value=f"`{code.code}`", inline=False)
-            embed.add_field(name="Reward", value=code.reward, inline=True)
-            embed.add_field(name="Expires", value=code.expires or "Unknown", inline=True)
-            embed.add_field(name="Source", value=code.source, inline=True)
-            embed.set_footer(text=f"Scraped at {code.scraped_at.strftime('%Y-%m-%d %H:%M UTC')}")
+            
+            # Add each code as a field
+            for i, code in enumerate(page_codes, start=start_idx + 1):
+                field_name = f"Code #{i}"
+                field_value = (
+                    f"**Code:** `{code.code}`\n"
+                    f"**Reward:** {code.reward}\n"
+                    f"**Expires:** {code.expires or 'Unknown'}\n"
+                    f"**Source:** {code.source}"
+                )
+                embed.add_field(name=field_name, value=field_value, inline=False)
+            
+            # Add footer with cache info
+            if bot.last_update:
+                embed.set_footer(text=f"Last updated: {bot.last_update.strftime('%Y-%m-%d %H:%M UTC')} • Use /refresh to update")
+            
             embeds.append(embed)
         
-        # Send response
-        if len(codes) > 10:
-            warning_embed = discord.Embed(
-                title="ℹ️ Note",
-                description=f"Showing 10 of {len(codes)} codes. Use `/refresh` to update the cache.",
-                color=discord.Color.blue()
-            )
-            embeds.insert(0, warning_embed)
+        # Send with pagination if multiple pages
+        if len(embeds) > 1:
+            view = CodePaginationView(embeds)
+            await interaction.followup.send(embed=embeds[0], view=view)
+        else:
+            await interaction.followup.send(embed=embeds[0])
         
-        await interaction.followup.send(embeds=embeds)
-        logger.info(f"Sent {len(embeds)} codes to {interaction.user}")
+        logger.info(f"Sent {len(codes)} codes ({total_pages} pages) to {interaction.user}")
         
     except Exception as e:
         logger.error(f"Error in get_codes command: {str(e)}")
+        import traceback
+        traceback.print_exc()
         embed = discord.Embed(
             title="❌ Error",
             description="An error occurred while fetching Shift codes. Please try again later.",
@@ -165,8 +241,8 @@ async def get_codes(interaction: discord.Interaction):
 
 @bot.tree.command(name="refresh", description="Force refresh the Shift codes cache")
 async def refresh_codes(interaction: discord.Interaction):
-    """Slash command to manually refresh codes"""
-    await interaction.response.defer(thinking=True)
+    """Slash command to manually refresh codes (ephemeral response)"""
+    await interaction.response.defer(thinking=True, ephemeral=True)
     
     try:
         codes = await bot.scraper.get_all_codes()
@@ -180,7 +256,7 @@ async def refresh_codes(interaction: discord.Interaction):
         )
         embed.set_footer(text=f"Updated at {bot.last_update.strftime('%Y-%m-%d %H:%M UTC')}")
         
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         logger.info(f"Cache refreshed by {interaction.user}")
         
     except Exception as e:
@@ -190,7 +266,7 @@ async def refresh_codes(interaction: discord.Interaction):
             description="An error occurred while refreshing the cache. Please try again later.",
             color=discord.Color.red()
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="latest", description="Get the most recent Borderlands 4 Shift code")
@@ -250,7 +326,7 @@ async def latest_code(interaction: discord.Interaction):
 
 @bot.tree.command(name="help", description="Get help with bot commands")
 async def help_command(interaction: discord.Interaction):
-    """Slash command to display help information"""
+    """Slash command to display help information (ephemeral response)"""
     embed = discord.Embed(
         title="🎮 Borderlands 4 Shift Code Bot - Help",
         description="Get Shift codes for Borderlands 4 from multiple sources!",
@@ -259,7 +335,7 @@ async def help_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="/codes",
-        value="Get all available Shift codes (up to 10)",
+        value="Get all available Shift codes with pagination support",
         inline=False
     )
     embed.add_field(
@@ -269,18 +345,18 @@ async def help_command(interaction: discord.Interaction):
     )
     embed.add_field(
         name="/refresh",
-        value="Force refresh the codes cache",
+        value="Force refresh the codes cache (only you can see the result)",
         inline=False
     )
     embed.add_field(
         name="/help",
-        value="Show this help message",
+        value="Show this help message (only you can see it)",
         inline=False
     )
     
-    embed.set_footer(text="Codes are cached and auto-updated every 6 hours")
+    embed.set_footer(text="Codes are cached for 1 hour and auto-updated every 6 hours")
     
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 def main():
