@@ -82,7 +82,10 @@ class ShiftCodeScraper:
             if not html:
                 return codes
             
-            soup = BeautifulSoup(html, 'html.parser')
+            # Parse HTML in executor to avoid blocking
+            import asyncio
+            loop = asyncio.get_event_loop()
+            soup = await loop.run_in_executor(None, BeautifulSoup, html, 'html.parser')
             
             # MentalMars uses a markdown-style table
             tables = soup.find_all('table')
@@ -128,7 +131,10 @@ class ShiftCodeScraper:
             if not html:
                 return codes
             
-            soup = BeautifulSoup(html, 'html.parser')
+            # Parse HTML in executor to avoid blocking
+            import asyncio
+            loop = asyncio.get_event_loop()
+            soup = await loop.run_in_executor(None, BeautifulSoup, html, 'html.parser')
             
             # Method 1: Look for script tags containing shift code arrays
             # The site defines codes in JavaScript like: const shiftCodes = ["CODE1", "CODE2"]
