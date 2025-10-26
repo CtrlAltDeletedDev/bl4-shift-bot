@@ -141,15 +141,16 @@ async def codes(interaction: discord.Interaction):
         )
         
         for i, code in enumerate(display_codes, 1):
-            status_emoji = "✅" if code.status.lower() == "active" else "❌"
+            # Note: ShiftCode doesn't have a status field, all scraped codes are assumed active
+            status_emoji = "✅"
             field_name = f"{status_emoji} Code {i}"
             field_value = f"**Code:** `{code.code}`\n"
             field_value += f"**Reward:** {code.reward}\n"
-            field_value += f"**Status:** {code.status}\n"
             field_value += f"**Source:** {code.source}"
             
-            if code.expiration:
-                field_value += f"\n**Expires:** {code.expiration}"
+            # Use 'expires' attribute, not 'expiration'
+            if code.expires:
+                field_value += f"\n**Expires:** {code.expires}"
             
             embed.add_field(name=field_name, value=field_value, inline=False)
         
@@ -159,7 +160,7 @@ async def codes(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
         
     except Exception as e:
-        logger.error(f"Error in /codes command: {e}")
+        logger.error(f"Error in /codes command: {e}", exc_info=True)
         await interaction.followup.send("An error occurred while fetching codes. Please try again later.")
 
 
@@ -178,21 +179,22 @@ async def latest(interaction: discord.Interaction):
         
         code = codes[0]
         
-        status_emoji = "✅" if code.status.lower() == "active" else "❌"
+        # All scraped codes are assumed active
+        status_emoji = "✅"
         
         embed = discord.Embed(
             title=f"{status_emoji} Latest Borderlands 4 Shift Code",
-            color=discord.Color.green() if code.status.lower() == "active" else discord.Color.red(),
+            color=discord.Color.green(),
             timestamp=datetime.now()
         )
         
         embed.add_field(name="Code", value=f"`{code.code}`", inline=False)
         embed.add_field(name="Reward", value=code.reward, inline=True)
-        embed.add_field(name="Status", value=code.status, inline=True)
-        embed.add_field(name="Source", value=code.source, inline=False)
+        embed.add_field(name="Source", value=code.source, inline=True)
         
-        if code.expiration:
-            embed.add_field(name="Expires", value=code.expiration, inline=False)
+        # Use 'expires' attribute, not 'expiration'
+        if code.expires:
+            embed.add_field(name="Expires", value=code.expires, inline=False)
         
         if client.last_update:
             embed.set_footer(text=f"Last updated: {client.last_update.strftime('%Y-%m-%d %H:%M:%S UTC')}")
@@ -200,7 +202,7 @@ async def latest(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
         
     except Exception as e:
-        logger.error(f"Error in /latest command: {e}")
+        logger.error(f"Error in /latest command: {e}", exc_info=True)
         await interaction.followup.send("An error occurred while fetching the latest code. Please try again later.")
 
 
@@ -228,7 +230,7 @@ async def refresh(interaction: discord.Interaction):
         )
         
     except Exception as e:
-        logger.error(f"Error in /refresh command: {e}")
+        logger.error(f"Error in /refresh command: {e}", exc_info=True)
         await interaction.followup.send(
             "An error occurred while refreshing codes. Please try again later.",
             ephemeral=True
