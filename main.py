@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -75,7 +75,7 @@ class ShiftCodeBot(commands.Bot):
         try:
             codes = await self.scraper.get_all_codes()
             self.cached_codes = codes
-            self.last_update = datetime.utcnow()
+            self.last_update = datetime.now(timezone.utc)
             logger.info(f"Updated cache with {len(codes)} codes")
         except Exception as e:
             logger.error(f"Error updating codes: {str(e)}")
@@ -157,23 +157,24 @@ async def on_ready():
 @bot.tree.command(name="codes", description="Get all available Borderlands 4 Shift codes")
 async def get_codes(interaction: discord.Interaction):
     """Slash command to get all Shift codes with pagination"""
+    # Respond immediately to avoid timeout
     await interaction.response.defer(thinking=True)
     
     try:
         # Use cached codes if available and recent (less than 1 hour old)
         if bot.cached_codes and bot.last_update:
-            time_diff = (datetime.utcnow() - bot.last_update).total_seconds()
+            time_diff = (datetime.now(timezone.utc) - bot.last_update).total_seconds()
             if time_diff < 3600:  # 1 hour
                 codes = bot.cached_codes
                 logger.info("Using cached codes")
             else:
                 codes = await bot.scraper.get_all_codes()
                 bot.cached_codes = codes
-                bot.last_update = datetime.utcnow()
+                bot.last_update = datetime.now(timezone.utc)
         else:
             codes = await bot.scraper.get_all_codes()
             bot.cached_codes = codes
-            bot.last_update = datetime.utcnow()
+            bot.last_update = datetime.now(timezone.utc)
         
         if not codes:
             embed = discord.Embed(
@@ -184,10 +185,12 @@ async def get_codes(interaction: discord.Interaction):
             await interaction.followup.send(embed=embed)
             return
         
-        # Create paginated embeds (max 10 codes per page due to field limits)
+        # Create paginated embeds
+        # Discord limits: 25 fields per embed, 1024 chars per field value
+        # Each code uses 1 field with ~150 chars, so 6 codes = 6 fields (safe)
         embeds = []
-        codes_per_page = 10
-        total_pages = (len(codes) + codes_per_page - 1) // codes_per_page  # Ceiling division
+        codes_per_page = 6  # Safe limit while still showing good amount
+        total_pages = (len(codes) + codes_per_page - 1) // codes_per_page
         
         for page in range(total_pages):
             start_idx = page * codes_per_page
@@ -197,13 +200,13 @@ async def get_codes(interaction: discord.Interaction):
             # Create embed for this page
             embed = discord.Embed(
                 title=f"🎮 Borderlands 4 Shift Codes",
-                description=f"Page {page + 1} of {total_pages} • Total Codes: {len(codes)}",
+                description=f"Page {page + 1} of {total_pages} • Total: {len(codes)} codes",
                 color=discord.Color.gold()
             )
             
             # Add each code as a field
             for i, code in enumerate(page_codes, start=start_idx + 1):
-                field_name = f"Code #{i}"
+                field_name = f"📋 Code #{i}"
                 field_value = (
                     f"**Code:** `{code.code}`\n"
                     f"**Reward:** {code.reward}\n"
@@ -231,12 +234,18 @@ async def get_codes(interaction: discord.Interaction):
         logger.error(f"Error in get_codes command: {str(e)}")
         import traceback
         traceback.print_exc()
-        embed = discord.Embed(
-            title="❌ Error",
-            description="An error occurred while fetching Shift codes. Please try again later.",
-            color=discord.Color.red()
-        )
-        await interaction.followup.send(embed=embed)
+        
+        # Try to send error message
+        try:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"An error occurred: {str(e)}\nPlease try again later.",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed)
+        except:
+            # If followup fails, interaction probably expired
+            logger.error("Could not send error message - interaction may have expired")
 
 
 @bot.tree.command(name="refresh", description="Force refresh the Shift codes cache")
@@ -247,7 +256,7 @@ async def refresh_codes(interaction: discord.Interaction):
     try:
         codes = await bot.scraper.get_all_codes()
         bot.cached_codes = codes
-        bot.last_update = datetime.utcnow()
+        bot.last_update = datetime.now(timezone.utc)
         
         embed = discord.Embed(
             title="✅ Cache Refreshed",
@@ -272,22 +281,26 @@ async def refresh_codes(interaction: discord.Interaction):
 @bot.tree.command(name="latest", description="Get the most recent Borderlands 4 Shift code")
 async def latest_code(interaction: discord.Interaction):
     """Slash command to get only the latest code"""
-    await interaction.response.defer(thinking=True)
+    try:
+        await interaction.response.defer(thinking=True)
+    except discord.errors.NotFound:
+        logger.error("Interaction expired before defer in latest command")
+        return
     
     try:
         # Use cached or fetch new
         if bot.cached_codes and bot.last_update:
-            time_diff = (datetime.utcnow() - bot.last_update).total_seconds()
+            time_diff = (datetime.now(timezone.utc) - bot.last_update).total_seconds()
             if time_diff < 3600:
                 codes = bot.cached_codes
             else:
                 codes = await bot.scraper.get_all_codes()
                 bot.cached_codes = codes
-                bot.last_update = datetime.utcnow()
+                bot.last_update = datetime.now(timezone.utc)
         else:
             codes = await bot.scraper.get_all_codes()
             bot.cached_codes = codes
-            bot.last_update = datetime.utcnow()
+            bot.last_update = datetime.now(timezone.utc)
         
         if not codes:
             embed = discord.Embed(
@@ -314,14 +327,22 @@ async def latest_code(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
         logger.info(f"Sent latest code to {interaction.user}")
         
+    except discord.errors.NotFound:
+        logger.error("Interaction expired in latest command")
     except Exception as e:
         logger.error(f"Error in latest command: {str(e)}")
-        embed = discord.Embed(
-            title="❌ Error",
-            description="An error occurred while fetching the latest code.",
-            color=discord.Color.red()
-        )
-        await interaction.followup.send(embed=embed)
+        import traceback
+        traceback.print_exc()
+        
+        try:
+            embed = discord.Embed(
+                title="❌ Error",
+                description="An error occurred while fetching the latest code.",
+                color=discord.Color.red()
+            )
+            await interaction.followup.send(embed=embed)
+        except:
+            logger.error("Could not send error message - interaction expired")
 
 
 @bot.tree.command(name="help", description="Get help with bot commands")
