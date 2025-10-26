@@ -4,7 +4,7 @@ Fetches shift codes from MentalMars and xsmashx88x tracker
 """
 import aiohttp
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 import logging
 import re
@@ -20,7 +20,7 @@ class ShiftCode:
         self.reward = reward
         self.expires = expires
         self.source = source
-        self.scraped_at = datetime.utcnow()
+        self.scraped_at = datetime.now(timezone.utc)
     
     def to_dict(self) -> Dict:
         return {
