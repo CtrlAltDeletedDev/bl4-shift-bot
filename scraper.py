@@ -118,7 +118,7 @@ class ShiftCodeScraper:
     async def scrape_xsmashx88x(self) -> List[ShiftCode]:
         """
         Scrape Shift codes from xsmashx88x's GitHub Pages Shift Code tracker
-        This is a community-maintained tracker with active/expired status
+        Note: This site uses JavaScript to render codes, so we parse the HTML/JS source
         """
         url = "https://xsmashx88x.github.io/Shift-Codes/"
         codes = []
@@ -130,76 +130,70 @@ class ShiftCodeScraper:
             
             soup = BeautifulSoup(html, 'html.parser')
             
-            # Method 1: Look for tables containing Borderlands 4 codes
-            # The site organizes codes by game in sections
-            tables = soup.find_all('table')
+            # Method 1: Look for script tags containing shift code arrays
+            # The site defines codes in JavaScript like: const shiftCodes = ["CODE1", "CODE2"]
+            scripts = soup.find_all('script')
             
-            for table in tables:
-                # Check if this table is for Borderlands 4
-                # Look at headings or table attributes
-                table_context = str(table.find_previous(['h1', 'h2', 'h3', 'h4']))
+            for script in scripts:
+                script_text = script.string
+                if not script_text:
+                    continue
                 
-                if 'borderlands 4' in table_context.lower() or 'bl4' in table_context.lower():
-                    rows = table.find_all('tr')
+                # Look for shift code patterns in the JavaScript
+                # Pattern: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
+                pattern = r'\b([A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5})\b'
+                matches = re.findall(pattern, script_text)
+                
+                for code_text in matches:
+                    # Skip example/placeholder codes
+                    if code_text in ['XXXXX-XXXXX-XXXXX-XXXXX-XXXXX', '3ZXJB-53STT-56T3W-B3TT3-HTS95']:
+                        continue
                     
-                    for row in rows[1:]:  # Skip header
-                        cells = row.find_all(['td', 'th'])
-                        
-                        if len(cells) >= 2:
-                            # Extract code - usually in a code tag or button
-                            code_elem = cells[0].find(['code', 'button', 'span']) or cells[0]
-                            code_text = code_elem.get_text(strip=True)
-                            
-                            # Extract reward info
-                            reward_text = cells[1].get_text(strip=True) if len(cells) > 1 else "Golden Key"
-                            
-                            # Extract expiration if available
-                            expires_text = cells[2].get_text(strip=True) if len(cells) > 2 else None
-                            
-                            # Validate shift code format
-                            if code_text and len(code_text) >= 20 and code_text.count('-') >= 4:
-                                # Check if marked as expired/active
-                                row_html = str(row).lower()
-                                is_expired = 'expired' in row_html or 'inactive' in row_html
-                                
-                                # Only add active codes
-                                if not is_expired:
-                                    codes.append(ShiftCode(
-                                        code=code_text,
-                                        reward=reward_text,
-                                        expires=expires_text,
-                                        source="xsmashx88x Tracker"
-                                    ))
+                    codes.append(ShiftCode(
+                        code=code_text,
+                        reward="Golden Key",
+                        expires=None,
+                        source="xsmashx88x Tracker"
+                    ))
             
-            # Method 2: If no tables found, use pattern matching as fallback
+            # Method 2: Parse any visible code elements in the DOM
+            # Look for code-related divs, spans, or text nodes
+            code_elements = soup.find_all(['div', 'span', 'code', 'pre'], 
+                                         class_=lambda x: x and ('code' in x.lower() if isinstance(x, str) else False))
+            
+            for elem in code_elements:
+                text = elem.get_text(strip=True)
+                # Match shift code pattern
+                pattern = r'\b([A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5})\b'
+                matches = re.findall(pattern, text)
+                
+                for code_text in matches:
+                    if code_text not in [c.code for c in codes]:  # Avoid duplicates
+                        codes.append(ShiftCode(
+                            code=code_text,
+                            reward="Golden Key",
+                            expires=None,
+                            source="xsmashx88x Tracker"
+                        ))
+            
+            # Method 3: Search entire page text as fallback
             if not codes:
-                # Look for Borderlands 4 section
-                bl4_found = False
-                for heading in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5']):
-                    heading_text = heading.get_text().lower()
-                    if 'borderlands 4' in heading_text or 'bl4' in heading_text:
-                        bl4_found = True
-                        
-                        # Get the section after this heading
-                        section = heading.find_next_sibling()
-                        if section:
-                            section_text = section.get_text()
-                            
-                            # Find shift codes using regex pattern
-                            # Pattern: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
-                            pattern = r'\b([A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5})\b'
-                            matches = re.findall(pattern, section_text)
-                            
-                            for match in matches:
-                                codes.append(ShiftCode(
-                                    code=match,
-                                    reward="Golden Key",
-                                    expires=None,
-                                    source="xsmashx88x Tracker"
-                                ))
-                        
-                        if bl4_found:
-                            break
+                page_text = soup.get_text()
+                pattern = r'\b([A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5}-[A-Z0-9]{5})\b'
+                matches = re.findall(pattern, page_text)
+                
+                # Filter out common placeholders
+                placeholders = ['XXXXX-XXXXX-XXXXX-XXXXX-XXXXX', '3ZXJB-53STT-56T3W-B3TT3-HTS95', 
+                               'BSRT3-FTZBJ-K6BTW-JB3T3-WXT99']
+                
+                for code_text in matches:
+                    if code_text not in placeholders and code_text not in [c.code for c in codes]:
+                        codes.append(ShiftCode(
+                            code=code_text,
+                            reward="Golden Key",
+                            expires=None,
+                            source="xsmashx88x Tracker"
+                        ))
             
             logger.info(f"Scraped {len(codes)} codes from xsmashx88x tracker")
             
