@@ -154,6 +154,20 @@ async def on_ready():
     logger.info(f'Bot is in {len(bot.guilds)} guilds')
 
 
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Global error handler for application commands"""
+    # Ignore NotFound errors (interaction expired) - these are harmless
+    if isinstance(error, app_commands.CommandInvokeError):
+        original = error.original
+        if isinstance(original, discord.errors.NotFound):
+            logger.debug(f"Interaction expired for command {interaction.command.name if interaction.command else 'unknown'}")
+            return
+    
+    # Log other errors
+    logger.error(f"Command error: {error}", exc_info=error)
+
+
 @bot.tree.command(name="codes", description="Get all available Borderlands 4 Shift codes")
 async def get_codes(interaction: discord.Interaction):
     """Slash command to get all Shift codes with pagination"""
@@ -281,10 +295,11 @@ async def refresh_codes(interaction: discord.Interaction):
 @bot.tree.command(name="latest", description="Get the most recent Borderlands 4 Shift code")
 async def latest_code(interaction: discord.Interaction):
     """Slash command to get only the latest code"""
+    # Defer immediately to avoid timeout
     try:
         await interaction.response.defer(thinking=True)
-    except discord.errors.NotFound:
-        logger.error("Interaction expired before defer in latest command")
+    except (discord.errors.NotFound, discord.errors.HTTPException) as e:
+        logger.warning(f"Could not defer latest command: {e}")
         return
     
     try:
@@ -293,6 +308,7 @@ async def latest_code(interaction: discord.Interaction):
             time_diff = (datetime.now(timezone.utc) - bot.last_update).total_seconds()
             if time_diff < 3600:
                 codes = bot.cached_codes
+                logger.info("Using cached codes for latest")
             else:
                 codes = await bot.scraper.get_all_codes()
                 bot.cached_codes = codes
@@ -327,13 +343,10 @@ async def latest_code(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed)
         logger.info(f"Sent latest code to {interaction.user}")
         
-    except discord.errors.NotFound:
-        logger.error("Interaction expired in latest command")
+    except (discord.errors.NotFound, discord.errors.HTTPException) as e:
+        logger.warning(f"Interaction issue in latest command: {e}")
     except Exception as e:
-        logger.error(f"Error in latest command: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
+        logger.error(f"Unexpected error in latest command: {str(e)}")
         try:
             embed = discord.Embed(
                 title="❌ Error",
@@ -342,7 +355,7 @@ async def latest_code(interaction: discord.Interaction):
             )
             await interaction.followup.send(embed=embed)
         except:
-            logger.error("Could not send error message - interaction expired")
+            pass  # Silently fail if we can't send error message
 
 
 @bot.tree.command(name="help", description="Get help with bot commands")
