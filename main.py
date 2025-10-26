@@ -1,19 +1,21 @@
 """
 Borderlands 4 Shift Codes Discord Bot
-Fetches and displays BL4 Shift codes using slash commands
+Fetches and displays BL4 Shift codes using slash commands with pagination
 """
 
 import os
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timedelta
+import math
 
 import discord
 from discord import app_commands
+from discord.ui import View, Button
 from dotenv import load_dotenv
 
-from scraper import ShiftCodeScraper
+from scraper import ShiftCodeScraper, ShiftCode
 
 # Load environment variables
 load_dotenv()
@@ -34,6 +36,107 @@ if not DISCORD_TOKEN:
 
 # Optional: Convert TEST_GUILD_ID to discord.Object for faster syncing during development
 MY_GUILD = discord.Object(id=int(TEST_GUILD_ID)) if TEST_GUILD_ID else None
+
+# Pagination settings
+CODES_PER_PAGE = 5
+
+
+class CodesPaginationView(View):
+    """Pagination view for browsing shift codes"""
+    
+    def __init__(self, codes: List[ShiftCode], page: int = 0, last_update: Optional[datetime] = None):
+        super().__init__(timeout=180)  # 3 minute timeout
+        self.codes = codes
+        self.page = page
+        self.last_update = last_update
+        self.total_pages = math.ceil(len(codes) / CODES_PER_PAGE)
+        
+        # Update button states
+        self.update_buttons()
+    
+    def update_buttons(self):
+        """Enable/disable buttons based on current page"""
+        # Disable first/previous if on first page
+        self.first_button.disabled = (self.page == 0)
+        self.prev_button.disabled = (self.page == 0)
+        
+        # Disable next/last if on last page
+        self.next_button.disabled = (self.page >= self.total_pages - 1)
+        self.last_button.disabled = (self.page >= self.total_pages - 1)
+    
+    def get_embed(self) -> discord.Embed:
+        """Generate embed for current page"""
+        start_idx = self.page * CODES_PER_PAGE
+        end_idx = min(start_idx + CODES_PER_PAGE, len(self.codes))
+        display_codes = self.codes[start_idx:end_idx]
+        
+        embed = discord.Embed(
+            title="🎮 Borderlands 4 Shift Codes",
+            description=f"Found {len(self.codes)} code(s) | Page {self.page + 1}/{self.total_pages}",
+            color=discord.Color.blue(),
+            timestamp=datetime.now()
+        )
+        
+        for i, code in enumerate(display_codes, start=start_idx + 1):
+            status_emoji = "✅"
+            field_name = f"{status_emoji} Code {i}"
+            field_value = f"**Code:** `{code.code}`\n"
+            field_value += f"**Reward:** {code.reward}\n"
+            field_value += f"**Source:** {code.source}"
+            
+            if code.expires:
+                field_value += f"\n**Expires:** {code.expires}"
+            
+            embed.add_field(name=field_name, value=field_value, inline=False)
+        
+        if self.last_update:
+            embed.set_footer(text=f"Last updated: {self.last_update.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        
+        return embed
+    
+    @discord.ui.button(label="⏮️ First", style=discord.ButtonStyle.primary, custom_id="first")
+    async def first_button(self, interaction: discord.Interaction, button: Button):
+        """Go to first page"""
+        self.page = 0
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    
+    @discord.ui.button(label="◀️ Previous", style=discord.ButtonStyle.primary, custom_id="prev")
+    async def prev_button(self, interaction: discord.Interaction, button: Button):
+        """Go to previous page"""
+        self.page = max(0, self.page - 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    
+    @discord.ui.button(label="▶️ Next", style=discord.ButtonStyle.primary, custom_id="next")
+    async def next_button(self, interaction: discord.Interaction, button: Button):
+        """Go to next page"""
+        self.page = min(self.total_pages - 1, self.page + 1)
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    
+    @discord.ui.button(label="⏭️ Last", style=discord.ButtonStyle.primary, custom_id="last")
+    async def last_button(self, interaction: discord.Interaction, button: Button):
+        """Go to last page"""
+        self.page = self.total_pages - 1
+        self.update_buttons()
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+    
+    @discord.ui.button(label="🗑️ Close", style=discord.ButtonStyle.danger, custom_id="close")
+    async def close_button(self, interaction: discord.Interaction, button: Button):
+        """Close the pagination view"""
+        await interaction.response.edit_message(
+            content="Closed shift codes list.",
+            embed=None,
+            view=None
+        )
+        self.stop()
+    
+    async def on_timeout(self):
+        """Called when the view times out"""
+        # Disable all buttons when timeout occurs
+        for item in self.children:
+            item.disabled = True
 
 
 class ShiftCodeBot(discord.Client):
@@ -120,7 +223,7 @@ async def on_ready():
 @client.tree.command()
 @app_commands.describe()
 async def codes(interaction: discord.Interaction):
-    """Get all available Shift codes (up to 10)"""
+    """Get all available Shift codes with pagination"""
     await interaction.response.defer(thinking=True)
     
     try:
@@ -130,34 +233,11 @@ async def codes(interaction: discord.Interaction):
             await interaction.followup.send("No Shift codes found at this time.")
             return
         
-        # Limit to 10 codes to avoid message length issues
-        display_codes = codes[:10]
+        # Create pagination view
+        view = CodesPaginationView(codes, page=0, last_update=client.last_update)
+        embed = view.get_embed()
         
-        embed = discord.Embed(
-            title="🎮 Borderlands 4 Shift Codes",
-            description=f"Found {len(codes)} code(s). Showing {len(display_codes)}.",
-            color=discord.Color.blue(),
-            timestamp=datetime.now()
-        )
-        
-        for i, code in enumerate(display_codes, 1):
-            # Note: ShiftCode doesn't have a status field, all scraped codes are assumed active
-            status_emoji = "✅"
-            field_name = f"{status_emoji} Code {i}"
-            field_value = f"**Code:** `{code.code}`\n"
-            field_value += f"**Reward:** {code.reward}\n"
-            field_value += f"**Source:** {code.source}"
-            
-            # Use 'expires' attribute, not 'expiration'
-            if code.expires:
-                field_value += f"\n**Expires:** {code.expires}"
-            
-            embed.add_field(name=field_name, value=field_value, inline=False)
-        
-        if client.last_update:
-            embed.set_footer(text=f"Last updated: {client.last_update.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, view=view)
         
     except Exception as e:
         logger.error(f"Error in /codes command: {e}", exc_info=True)
@@ -249,7 +329,7 @@ async def help(interaction: discord.Interaction):
     
     embed.add_field(
         name="/codes",
-        value="Get all available Shift codes (up to 10 most recent)",
+        value="Get all available Shift codes with pagination (5 per page)",
         inline=False
     )
     
@@ -276,7 +356,8 @@ async def help(interaction: discord.Interaction):
         value="• 🔄 Auto-updates every 6 hours\n"
               "• 💾 Smart caching\n"
               "• 🌐 Multiple sources\n"
-              "• ⚡ Fast responses",
+              "• ⚡ Fast responses\n"
+              "• 📄 Paginated code browsing",
         inline=False
     )
     
