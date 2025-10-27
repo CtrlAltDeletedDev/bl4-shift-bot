@@ -16,6 +16,7 @@ from discord.ui import View, Button
 from dotenv import load_dotenv
 
 from scraper import ShiftCodeScraper, ShiftCode
+from database import ShiftCodeDatabase
 
 # Load environment variables
 load_dotenv()
@@ -147,6 +148,7 @@ class ShiftCodeBot(discord.Client):
         # Create a CommandTree instance for app commands
         self.tree = app_commands.CommandTree(self)
         self.scraper = ShiftCodeScraper()
+        self.db = ShiftCodeDatabase()
         
         # Cache for codes
         self.codes_cache = []
@@ -155,6 +157,10 @@ class ShiftCodeBot(discord.Client):
         
     async def setup_hook(self):
         """This is called when the bot is starting up"""
+        # Initialize database
+        await self.db.connect()
+        logger.info("Database initialized")
+        
         # Sync commands to the test guild if specified, otherwise sync globally
         if MY_GUILD:
             # Copy global commands to the test guild for faster syncing
@@ -175,28 +181,92 @@ class ShiftCodeBot(discord.Client):
         while not self.is_closed():
             try:
                 logger.info("Background: Refreshing shift codes...")
-                codes = await self.scraper.get_all_codes()
-                self.codes_cache = codes
+                
+                # Scrape new codes
+                scraped_codes = await self.scraper.get_all_codes()
+                
+                # Save to database
+                new_codes_count = 0
+                for code in scraped_codes:
+                    code_id, is_new = await self.db.add_or_update_code(
+                        code.code,
+                        code.reward,
+                        code.expires,
+                        code.source
+                    )
+                    if is_new:
+                        new_codes_count += 1
+                
+                # Update cache from database
+                self.codes_cache = await self.get_codes_from_db()
                 self.last_update = datetime.now()
-                logger.info(f"Background: Cached {len(codes)} codes")
+                
+                logger.info(f"Background: Cached {len(self.codes_cache)} codes ({new_codes_count} new)")
+                
+                # TODO: Send notifications for new codes
+                
             except Exception as e:
                 logger.error(f"Background: Error refreshing codes: {e}")
             
             # Wait 6 hours before next update
             await asyncio.sleep(21600)  # 6 hours
     
+    async def get_codes_from_db(self) -> List[ShiftCode]:
+        """Get codes from database and convert to ShiftCode objects"""
+        db_codes = await self.db.get_all_active_codes()
+        
+        shift_codes = []
+        for db_code in db_codes:
+            shift_code = ShiftCode(
+                code=db_code['code'],
+                reward=db_code['reward'],
+                expires=db_code['expires'],
+                source=db_code['source']
+            )
+            shift_codes.append(shift_code)
+        
+        return shift_codes
+    
     async def get_codes(self, force_refresh: bool = False):
         """Get codes from cache or scrape fresh"""
         if force_refresh or not self.codes_cache or not self.last_update:
             logger.info("Fetching fresh codes...")
-            self.codes_cache = await self.scraper.get_all_codes()
+            
+            # Scrape new codes
+            scraped_codes = await self.scraper.get_all_codes()
+            
+            # Save to database
+            for code in scraped_codes:
+                await self.db.add_or_update_code(
+                    code.code,
+                    code.reward,
+                    code.expires,
+                    code.source
+                )
+            
+            # Load from database
+            self.codes_cache = await self.get_codes_from_db()
             self.last_update = datetime.now()
             return self.codes_cache
         
         # Check if cache is still valid
         if datetime.now() - self.last_update > self.cache_duration:
             logger.info("Cache expired, refreshing...")
-            self.codes_cache = await self.scraper.get_all_codes()
+            
+            # Scrape new codes
+            scraped_codes = await self.scraper.get_all_codes()
+            
+            # Save to database
+            for code in scraped_codes:
+                await self.db.add_or_update_code(
+                    code.code,
+                    code.reward,
+                    code.expires,
+                    code.source
+                )
+            
+            # Load from database
+            self.codes_cache = await self.get_codes_from_db()
             self.last_update = datetime.now()
         
         return self.codes_cache
@@ -227,6 +297,13 @@ async def codes(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
     
     try:
+        # Log command usage
+        await client.db.log_command_usage(
+            "codes",
+            str(interaction.user.id),
+            str(interaction.guild_id) if interaction.guild else None
+        )
+        
         codes = await client.get_codes()
         
         if not codes:
@@ -251,6 +328,13 @@ async def latest(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
     
     try:
+        # Log command usage
+        await client.db.log_command_usage(
+            "latest",
+            str(interaction.user.id),
+            str(interaction.guild_id) if interaction.guild else None
+        )
+        
         codes = await client.get_codes()
         
         if not codes:
@@ -319,6 +403,71 @@ async def refresh(interaction: discord.Interaction):
 
 @client.tree.command()
 @app_commands.describe()
+async def stats(interaction: discord.Interaction):
+    """Show bot statistics"""
+    await interaction.response.defer(thinking=True)
+    
+    try:
+        # Log command usage
+        await client.db.log_command_usage(
+            "stats",
+            str(interaction.user.id),
+            str(interaction.guild_id) if interaction.guild else None
+        )
+        
+        # Get database statistics
+        db_stats = await client.db.get_statistics()
+        cmd_stats = await client.db.get_command_stats(days=7)
+        
+        embed = discord.Embed(
+            title="📊 Bot Statistics",
+            description="Usage and code tracking statistics",
+            color=discord.Color.blue(),
+            timestamp=datetime.now()
+        )
+        
+        # Code statistics
+        code_stats = f"**Total Codes:** {db_stats['total_codes']}\n"
+        code_stats += f"**Active:** {db_stats['active_codes']}\n"
+        code_stats += f"**Expired:** {db_stats['inactive_codes']}"
+        embed.add_field(name="📝 Codes", value=code_stats, inline=True)
+        
+        # Source statistics
+        source_stats = ""
+        for source, count in db_stats['by_source'].items():
+            source_stats += f"**{source}:** {count}\n"
+        if source_stats:
+            embed.add_field(name="🌐 By Source", value=source_stats, inline=True)
+        
+        # Command usage (last 7 days)
+        cmd_usage = f"**Total Commands:** {cmd_stats['total_commands']}\n"
+        cmd_usage += f"**Unique Users:** {cmd_stats['unique_users']}\n"
+        if cmd_stats['by_command']:
+            cmd_usage += "\n**Most Used:**\n"
+            for cmd, count in list(cmd_stats['by_command'].items())[:3]:
+                cmd_usage += f"  `/{cmd}`: {count}\n"
+        embed.add_field(name="📈 Usage (7 days)", value=cmd_usage, inline=False)
+        
+        # Top rewards
+        if db_stats['top_rewards']:
+            rewards_text = ""
+            for reward, count in db_stats['top_rewards'][:3]:
+                rewards_text += f"**{reward}:** {count} codes\n"
+            embed.add_field(name="🎁 Top Rewards", value=rewards_text, inline=True)
+        
+        # Last update
+        if client.last_update:
+            embed.set_footer(text=f"Last scrape: {client.last_update.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        
+        await interaction.followup.send(embed=embed)
+        
+    except Exception as e:
+        logger.error(f"Error in /stats command: {e}", exc_info=True)
+        await interaction.followup.send("An error occurred while fetching statistics.")
+
+
+@client.tree.command()
+@app_commands.describe()
 async def help(interaction: discord.Interaction):
     """Display help information"""
     embed = discord.Embed(
@@ -342,6 +491,12 @@ async def help(interaction: discord.Interaction):
     embed.add_field(
         name="/refresh",
         value="Force refresh the codes cache (Admin only)",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="/stats",
+        value="Show bot statistics and usage data",
         inline=False
     )
     
@@ -376,5 +531,12 @@ async def help(interaction: discord.Interaction):
 if __name__ == "__main__":
     try:
         client.run(DISCORD_TOKEN)
+    except KeyboardInterrupt:
+        logger.info("Bot shutdown requested")
     except Exception as e:
         logger.error(f"Failed to start bot: {e}")
+    finally:
+        # Clean up database connection
+        import asyncio
+        if client.db.connection:
+            asyncio.run(client.db.close())
