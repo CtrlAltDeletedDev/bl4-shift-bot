@@ -443,6 +443,90 @@ class ShiftCodeDatabase:
 
             return deleted
 
+    async def update_expired_codes(self) -> int:
+        """
+        Check all active codes and mark expired ones as inactive.
+        Returns the number of codes marked as expired.
+        """
+        from datetime import datetime
+
+        async with self.connection.cursor() as cursor:
+            # Get all active codes with expiration dates
+            await cursor.execute(
+                """
+                SELECT id, code, expires
+                FROM codes
+                WHERE is_active = 1 AND expires IS NOT NULL AND expires != ''
+            """
+            )
+
+            rows = await cursor.fetchall()
+            expired_count = 0
+
+            for row in rows:
+                code_id = row[0]
+                code = row[1]
+                expires = row[2]
+
+                # Check if expired using our helper function
+                # Import here to avoid circular imports
+                try:
+                    # Parse expiration date
+                    expires_lower = expires.lower().strip()
+
+                    # Skip "never" type expirations
+                    if expires_lower in [
+                        "never",
+                        "no expiration",
+                        "permanent",
+                        "n/a",
+                        "none",
+                    ]:
+                        continue
+
+                    # Try to parse as date
+                    date_formats = [
+                        "%Y-%m-%d",  # 2025-12-31
+                        "%m/%d/%Y",  # 12/31/2025
+                        "%d/%m/%Y",  # 31/12/2025
+                        "%B %d, %Y",  # December 31, 2025
+                        "%b %d, %Y",  # Dec 31, 2025
+                        "%Y-%m-%d %H:%M:%S",  # 2025-12-31 23:59:59
+                    ]
+
+                    expiration_date = None
+                    for fmt in date_formats:
+                        try:
+                            expiration_date = datetime.strptime(expires, fmt)
+                            break
+                        except ValueError:
+                            continue
+
+                    if expiration_date and expiration_date < datetime.now():
+                        # Code is expired, mark as inactive
+                        await cursor.execute(
+                            """
+                            UPDATE codes
+                            SET is_active = 0
+                            WHERE id = ?
+                        """,
+                            (code_id,),
+                        )
+                        expired_count += 1
+                        logger.info(f"Marked code as expired: {code}")
+
+                except Exception as e:
+                    # If we can't parse the date, skip it (keep active)
+                    logger.debug(f"Could not parse expiration for code {code}: {e}")
+                    continue
+
+            await self.connection.commit()
+
+            if expired_count > 0:
+                logger.info(f"Marked {expired_count} code(s) as expired")
+
+            return expired_count
+
 
 # Context manager support
 class Database:
