@@ -25,12 +25,13 @@ class ShiftCodeBot(commands.Bot):
         command_prefix: str = "!",
         intents: discord.Intents = None,
         test_guild: Optional[discord.Object] = None,
+        owner_id: Optional[int] = None,
     ):
         if intents is None:
             intents = discord.Intents.default()
             intents.message_content = True
 
-        super().__init__(command_prefix=command_prefix, intents=intents)
+        super().__init__(command_prefix=command_prefix, intents=intents, owner_id=owner_id)
 
         # Initialize utilities
         self.scraper = ShiftCodeScraper()
@@ -56,14 +57,9 @@ class ShiftCodeBot(commands.Bot):
         # Load all cogs
         await self.load_cogs()
 
-        # Sync commands to guild if test_guild is set, otherwise globally
-        if self.test_guild:
-            self.tree.copy_global_to(guild=self.test_guild)
-            await self.tree.sync(guild=self.test_guild)
-            logger.info(f"Synced commands to guild {self.test_guild.id}")
-        else:
-            await self.tree.sync()
-            logger.info("Synced commands globally")
+        # NOTE: Commands are NOT synced automatically!
+        # Use the !sync command to manually sync slash commands
+        logger.info("Bot ready. Use !sync to sync slash commands to Discord.")
 
         # Start background task
         self.bg_task = self.loop.create_task(self.update_codes_background())

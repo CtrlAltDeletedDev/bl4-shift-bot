@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 # Get environment variables
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 TEST_GUILD_ID = os.getenv("TEST_GUILD_ID")
+BOT_OWNER_ID = os.getenv("BOT_OWNER_ID")  # Your Discord user ID
 
 if not DISCORD_TOKEN:
     raise ValueError("DISCORD_TOKEN not found in .env file")
@@ -84,10 +85,21 @@ def main():
     intents = discord.Intents.default()
     intents.message_content = True
 
-    # Create bot instance with optional test guild
-    bot = ShiftCodeBot(intents=intents, test_guild=MY_GUILD)
+    # Parse owner ID if provided
+    owner_id = int(BOT_OWNER_ID) if BOT_OWNER_ID else None
+
+    # Create bot instance with optional test guild and owner ID
+    bot = ShiftCodeBot(
+        intents=intents,
+        test_guild=MY_GUILD,
+        owner_id=owner_id
+    )
 
     logger.info("Starting BL4 Shift Code Bot...")
+    if owner_id:
+        logger.info(f"Bot owner ID: {owner_id}")
+    else:
+        logger.warning("No BOT_OWNER_ID set - owner commands will not work!")
 
     try:
         # Run the bot

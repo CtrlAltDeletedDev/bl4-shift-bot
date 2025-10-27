@@ -45,6 +45,62 @@ class AdminCog(commands.Cog, name="Admin"):
                 ephemeral=True,
             )
 
+    # --- Prefix Commands (Owner Only) ---
+    # These use ! prefix and are NOT slash commands
+
+    @commands.command(name="sync")
+    @commands.is_owner()
+    async def sync_commands(self, ctx):
+        """Sync slash commands (Owner only)"""
+        await ctx.send("🔄 Syncing slash commands...")
+
+        try:
+            if self.bot.test_guild:
+                # Sync to test guild
+                self.bot.tree.copy_global_to(guild=self.bot.test_guild)
+                await self.bot.tree.sync(guild=self.bot.test_guild)
+                await ctx.send(f"✅ Synced commands to guild {self.bot.test_guild.id}")
+            else:
+                # Sync globally
+                await self.bot.tree.sync()
+                await ctx.send("✅ Synced commands globally (may take up to 1 hour)")
+        except Exception as e:
+            await ctx.send(f"❌ Error syncing: {e}")
+            logger.error(f"Error syncing commands: {e}", exc_info=True)
+
+    @commands.command(name="shutdown")
+    @commands.is_owner()
+    async def shutdown_bot(self, ctx):
+        """Shutdown the bot (Owner only)"""
+        await ctx.send("👋 Shutting down...")
+        logger.info(f"Shutdown command issued by {ctx.author}")
+        await self.bot.close()
+
+    @commands.command(name="reload")
+    @commands.is_owner()
+    async def reload_cog(self, ctx, cog_name: str = None):
+        """Reload a specific cog or all cogs (Owner only)"""
+        if cog_name:
+            # Reload specific cog
+            try:
+                await self.bot.reload_extension(f"bot.cogs.{cog_name}")
+                await ctx.send(f"✅ Reloaded cog: {cog_name}")
+                logger.info(f"Reloaded cog: {cog_name}")
+            except Exception as e:
+                await ctx.send(f"❌ Error reloading {cog_name}: {e}")
+                logger.error(f"Error reloading cog {cog_name}: {e}", exc_info=True)
+        else:
+            # Reload all cogs
+            await ctx.send("🔄 Reloading all cogs...")
+            try:
+                for ext in list(self.bot.extensions.keys()):
+                    if ext.startswith("bot.cogs."):
+                        await self.bot.reload_extension(ext)
+                await ctx.send("✅ All cogs reloaded")
+                logger.info("All cogs reloaded")
+            except Exception as e:
+                await ctx.send(f"❌ Error reloading cogs: {e}")
+                logger.error(f"Error reloading cogs: {e}", exc_info=True)
 
 async def setup(bot):
     """Setup function to add the cog to the bot"""
