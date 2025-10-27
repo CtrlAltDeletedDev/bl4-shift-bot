@@ -48,6 +48,27 @@ class AdminCog(commands.Cog, name="Admin"):
     # --- Prefix Commands (Owner Only) ---
     # These use ! prefix and are NOT slash commands
 
+    @commands.command(name="refresh")
+    @commands.is_owner()
+    async def force_refresh(self, ctx):
+        """Force refresh shift codes from all sources (Owner only)"""
+        await ctx.send("🔄 Force refreshing shift codes...")
+
+        try:
+            # Update expired codes first
+            expired_count = await self.bot.db.update_expired_codes()
+            if expired_count > 0:
+                await ctx.send(f"📋 Marked {expired_count} code(s) as expired")
+
+            # Force refresh from sources
+            codes = await self.bot.get_codes(force_refresh=True)
+
+            await ctx.send(f"✅ Refreshed! Found {len(codes)} active code(s)")
+            logger.info(f"Manual force refresh by {ctx.author}")
+        except Exception as e:
+            await ctx.send(f"❌ Error refreshing: {e}")
+            logger.error(f"Error in !refresh command: {e}", exc_info=True)
+
     @commands.command(name="sync")
     @commands.is_owner()
     async def sync_commands(self, ctx):
