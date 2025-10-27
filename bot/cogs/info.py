@@ -154,7 +154,7 @@ class InfoCog(commands.Cog, name="Info"):
 
         embed.set_footer(text="Bot made for the Borderlands community")
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 async def setup(bot):

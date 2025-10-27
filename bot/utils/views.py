@@ -10,6 +10,7 @@ import discord
 from discord.ui import View, Button
 
 from .scraper import ShiftCode
+from .helpers import format_code_field
 
 # Pagination settings
 CODES_PER_PAGE = 5
@@ -57,15 +58,15 @@ class CodesPaginationView(View):
         )
 
         for i, code in enumerate(display_codes, start=start_idx + 1):
-            status_emoji = "✅"
+            # Format code with proper expiration status
+            status_emoji, field_value = format_code_field(
+                code.code,
+                code.reward,
+                code.source,
+                code.expires
+            )
+
             field_name = f"{status_emoji} Code {i}"
-            field_value = f"**Code:** `{code.code}`\n"
-            field_value += f"**Reward:** {code.reward}\n"
-            field_value += f"**Source:** {code.source}"
-
-            if code.expires:
-                field_value += f"\n**Expires:** {code.expires}"
-
             embed.add_field(name=field_name, value=field_value, inline=False)
 
         if self.last_update:

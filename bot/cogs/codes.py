@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..utils.views import CodesPaginationView
+from ..utils.helpers import format_code_field
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +73,25 @@ class CodesCog(commands.Cog, name="Codes"):
 
             code = codes[0]
 
-            # All scraped codes are assumed active
-            status_emoji = "✅"
+            # Check expiration status
+            status_emoji, _ = format_code_field(
+                code.code,
+                code.reward,
+                code.source,
+                code.expires
+            )
+
+            # Set color based on status
+            if status_emoji == "❌":
+                embed_color = discord.Color.red()
+            elif status_emoji == "⚠️":
+                embed_color = discord.Color.orange()
+            else:
+                embed_color = discord.Color.green()
 
             embed = discord.Embed(
                 title=f"{status_emoji} Latest Borderlands 4 Shift Code",
-                color=discord.Color.green(),
+                color=embed_color,
                 timestamp=datetime.now(),
             )
 
@@ -85,9 +99,23 @@ class CodesCog(commands.Cog, name="Codes"):
             embed.add_field(name="Reward", value=code.reward, inline=True)
             embed.add_field(name="Source", value=code.source, inline=True)
 
-            # Use 'expires' attribute, not 'expiration'
+            # Add expiration info with proper status
             if code.expires:
-                embed.add_field(name="Expires", value=code.expires, inline=False)
+                from ..utils.helpers import check_code_expiration
+                is_expired, _ = check_code_expiration(code.expires)
+
+                if is_expired:
+                    embed.add_field(
+                        name="Status",
+                        value=f"❌ Expired ({code.expires})",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="Expires",
+                        value=code.expires,
+                        inline=False
+                    )
 
             if self.bot.last_update:
                 embed.set_footer(
