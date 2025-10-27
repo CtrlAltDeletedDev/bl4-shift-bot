@@ -218,3 +218,11 @@ __marimo__/
 # Sqlite
 *.sqlite
 *.db
+
+# Application logs
+logs/
+!logs/.gitkeep
+
+# Old/backup files
+*.old
+main.py.old
