@@ -64,7 +64,7 @@ def check_code_expiration(expires: Optional[str]) -> Tuple[bool, str]:
         return False, "⚠️"
 
 
-def format_code_field(code_str: str, reward: str, source: str, expires: Optional[str]) -> Tuple[str, str, str]:
+def format_code_field(code_str: str, reward: str, source: str, expires: Optional[str]) -> Tuple[str, str]:
     """
     Format a code's field for display in Discord embed.
 
@@ -75,7 +75,7 @@ def format_code_field(code_str: str, reward: str, source: str, expires: Optional
         expires: Expiration info
 
     Returns:
-        Tuple of (field_name, field_value, status_emoji)
+        Tuple of (status_emoji, field_value)
     """
     is_expired, emoji = check_code_expiration(expires)
 
