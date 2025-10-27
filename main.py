@@ -182,11 +182,15 @@ class ShiftCodeBot(discord.Client):
             try:
                 logger.info("Background: Refreshing shift codes...")
                 
+                # Track codes before scraping to detect new ones
+                old_codes = {code.code for code in self.codes_cache}
+                
                 # Scrape new codes
                 scraped_codes = await self.scraper.get_all_codes()
                 
-                # Save to database
+                # Save to database and track new codes
                 new_codes_count = 0
+                new_codes = []
                 for code in scraped_codes:
                     code_id, is_new = await self.db.add_or_update_code(
                         code.code,
@@ -196,6 +200,7 @@ class ShiftCodeBot(discord.Client):
                     )
                     if is_new:
                         new_codes_count += 1
+                        new_codes.append(code)
                 
                 # Update cache from database
                 self.codes_cache = await self.get_codes_from_db()
@@ -203,13 +208,92 @@ class ShiftCodeBot(discord.Client):
                 
                 logger.info(f"Background: Cached {len(self.codes_cache)} codes ({new_codes_count} new)")
                 
-                # TODO: Send notifications for new codes
+                # Send notifications for new codes
+                if new_codes:
+                    await self.notify_new_codes(new_codes)
                 
             except Exception as e:
                 logger.error(f"Background: Error refreshing codes: {e}")
             
             # Wait 6 hours before next update
             await asyncio.sleep(21600)  # 6 hours
+    
+    async def notify_new_codes(self, new_codes: List[ShiftCode]):
+        """Send notifications to subscribed channels about new codes"""
+        try:
+            # Get all subscribed channels
+            subscriptions = await self.db.get_notification_subscriptions()
+            
+            if not subscriptions:
+                logger.info("No subscribed channels for notifications")
+                return
+            
+            logger.info(f"Notifying {len(subscriptions)} channel(s) about {len(new_codes)} new code(s)")
+            
+            # Create notification embed
+            embed = discord.Embed(
+                title="🔔 New Shift Codes Detected!",
+                description=f"Found {len(new_codes)} new code(s)",
+                color=discord.Color.green(),
+                timestamp=datetime.now()
+            )
+            
+            # Add each new code
+            for i, code in enumerate(new_codes[:5], 1):  # Limit to 5 codes per notification
+                field_name = f"✨ Code {i}"
+                field_value = f"**Code:** `{code.code}`\n"
+                field_value += f"**Reward:** {code.reward}\n"
+                field_value += f"**Source:** {code.source}"
+                
+                if code.expires:
+                    field_value += f"\n**Expires:** {code.expires}"
+                
+                embed.add_field(name=field_name, value=field_value, inline=False)
+            
+            if len(new_codes) > 5:
+                embed.add_field(
+                    name="📋 More Codes",
+                    value=f"And {len(new_codes) - 5} more! Use `/codes` to see all.",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="🔗 Redeem",
+                value="[Click here to redeem](https://shift.gearboxsoftware.com/rewards)",
+                inline=False
+            )
+            
+            embed.set_footer(text="Use /unsubscribe to stop notifications")
+            
+            # Send to all subscribed channels
+            success_count = 0
+            failed_channels = []
+            
+            for sub in subscriptions:
+                try:
+                    channel = self.get_channel(int(sub['channel_id']))
+                    if channel:
+                        await channel.send(embed=embed)
+                        success_count += 1
+                    else:
+                        # Channel not found, mark for cleanup
+                        failed_channels.append(sub['channel_id'])
+                        logger.warning(f"Channel {sub['channel_id']} not found, marking for cleanup")
+                except discord.Forbidden:
+                    failed_channels.append(sub['channel_id'])
+                    logger.warning(f"No permission to send to channel {sub['channel_id']}")
+                except Exception as e:
+                    failed_channels.append(sub['channel_id'])
+                    logger.error(f"Error sending to channel {sub['channel_id']}: {e}")
+            
+            logger.info(f"Notifications sent to {success_count}/{len(subscriptions)} channel(s)")
+            
+            # Clean up failed channels
+            for channel_id in failed_channels:
+                await self.db.remove_notification_subscription(channel_id)
+            
+        except Exception as e:
+            logger.error(f"Error in notify_new_codes: {e}", exc_info=True)
     
     async def get_codes_from_db(self) -> List[ShiftCode]:
         """Get codes from database and convert to ShiftCode objects"""
@@ -403,6 +487,123 @@ async def refresh(interaction: discord.Interaction):
 
 @client.tree.command()
 @app_commands.describe()
+async def subscribe(interaction: discord.Interaction):
+    """Subscribe this channel to new code notifications"""
+    await interaction.response.defer(thinking=True)
+    
+    try:
+        # Log command usage
+        await client.db.log_command_usage(
+            "subscribe",
+            str(interaction.user.id),
+            str(interaction.guild_id) if interaction.guild else None
+        )
+        
+        # Check if user has manage channels permission
+        if interaction.guild and not interaction.user.guild_permissions.manage_channels:
+            await interaction.followup.send(
+                "⛔ You need 'Manage Channels' permission to subscribe to notifications.",
+                ephemeral=True
+            )
+            return
+        
+        # Subscribe the channel
+        success = await client.db.add_notification_subscription(
+            str(interaction.channel_id),
+            str(interaction.guild_id) if interaction.guild else "DM"
+        )
+        
+        if success:
+            embed = discord.Embed(
+                title="✅ Subscribed to Notifications",
+                description="This channel will now receive notifications when new Shift codes are discovered!",
+                color=discord.Color.green()
+            )
+            embed.add_field(
+                name="📬 What you'll get",
+                value="• Automatic alerts for new codes\n"
+                      "• Updates every 6 hours\n"
+                      "• Direct redemption links",
+                inline=False
+            )
+            embed.add_field(
+                name="🔕 Unsubscribe",
+                value="Use `/unsubscribe` to stop notifications",
+                inline=False
+            )
+            embed.set_footer(text="Notifications will appear in this channel")
+            
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Channel {interaction.channel_id} subscribed to notifications")
+        else:
+            await interaction.followup.send(
+                "ℹ️ This channel is already subscribed to notifications.",
+                ephemeral=True
+            )
+        
+    except Exception as e:
+        logger.error(f"Error in /subscribe command: {e}", exc_info=True)
+        await interaction.followup.send(
+            "An error occurred while subscribing to notifications.",
+            ephemeral=True
+        )
+
+
+@client.tree.command()
+@app_commands.describe()
+async def unsubscribe(interaction: discord.Interaction):
+    """Unsubscribe this channel from new code notifications"""
+    await interaction.response.defer(thinking=True)
+    
+    try:
+        # Log command usage
+        await client.db.log_command_usage(
+            "unsubscribe",
+            str(interaction.user.id),
+            str(interaction.guild_id) if interaction.guild else None
+        )
+        
+        # Check if user has manage channels permission
+        if interaction.guild and not interaction.user.guild_permissions.manage_channels:
+            await interaction.followup.send(
+                "⛔ You need 'Manage Channels' permission to unsubscribe from notifications.",
+                ephemeral=True
+            )
+            return
+        
+        # Unsubscribe the channel
+        success = await client.db.remove_notification_subscription(str(interaction.channel_id))
+        
+        if success:
+            embed = discord.Embed(
+                title="🔕 Unsubscribed from Notifications",
+                description="This channel will no longer receive new code notifications.",
+                color=discord.Color.orange()
+            )
+            embed.add_field(
+                name="🔔 Want to re-subscribe?",
+                value="Use `/subscribe` to enable notifications again",
+                inline=False
+            )
+            
+            await interaction.followup.send(embed=embed)
+            logger.info(f"Channel {interaction.channel_id} unsubscribed from notifications")
+        else:
+            await interaction.followup.send(
+                "ℹ️ This channel is not subscribed to notifications.",
+                ephemeral=True
+            )
+        
+    except Exception as e:
+        logger.error(f"Error in /unsubscribe command: {e}", exc_info=True)
+        await interaction.followup.send(
+            "An error occurred while unsubscribing from notifications.",
+            ephemeral=True
+        )
+
+
+@client.tree.command()
+@app_commands.describe()
 async def stats(interaction: discord.Interaction):
     """Show bot statistics"""
     await interaction.response.defer(thinking=True)
@@ -455,6 +656,13 @@ async def stats(interaction: discord.Interaction):
                 rewards_text += f"**{reward}:** {count} codes\n"
             embed.add_field(name="🎁 Top Rewards", value=rewards_text, inline=True)
         
+        # Notification subscriptions
+        subscriptions = await client.db.get_notification_subscriptions()
+        if subscriptions:
+            sub_text = f"**Active Subscriptions:** {len(subscriptions)}\n"
+            sub_text += "Channels receiving notifications"
+            embed.add_field(name="🔔 Notifications", value=sub_text, inline=True)
+        
         # Last update
         if client.last_update:
             embed.set_footer(text=f"Last scrape: {client.last_update.strftime('%Y-%m-%d %H:%M:%S UTC')}")
@@ -495,6 +703,18 @@ async def help(interaction: discord.Interaction):
     )
     
     embed.add_field(
+        name="/subscribe",
+        value="Subscribe this channel to new code notifications",
+        inline=False
+    )
+    
+    embed.add_field(
+        name="/unsubscribe",
+        value="Unsubscribe this channel from notifications",
+        inline=False
+    )
+    
+    embed.add_field(
         name="/stats",
         value="Show bot statistics and usage data",
         inline=False
@@ -512,7 +732,8 @@ async def help(interaction: discord.Interaction):
               "• 💾 Smart caching\n"
               "• 🌐 Multiple sources\n"
               "• ⚡ Fast responses\n"
-              "• 📄 Paginated code browsing",
+              "• 📄 Paginated code browsing\n"
+              "• 🔔 Automatic notifications",
         inline=False
     )
     
