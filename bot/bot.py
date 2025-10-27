@@ -104,6 +104,9 @@ class ShiftCodeBot(commands.Bot):
         if force_refresh or not self.codes_cache or not self.last_update:
             logger.info("Fetching fresh codes...")
 
+            # Check for expired codes first
+            await self.db.update_expired_codes()
+
             # Scrape new codes
             scraped_codes = await self.scraper.get_all_codes()
 
@@ -113,7 +116,7 @@ class ShiftCodeBot(commands.Bot):
                     code.code, code.reward, code.expires, code.source
                 )
 
-            # Load from database
+            # Load from database (excludes expired codes)
             self.codes_cache = await self.get_codes_from_db()
             self.last_update = datetime.now()
             return self.codes_cache
@@ -122,6 +125,9 @@ class ShiftCodeBot(commands.Bot):
         if datetime.now() - self.last_update > self.cache_duration:
             logger.info("Cache expired, refreshing...")
 
+            # Check for expired codes first
+            await self.db.update_expired_codes()
+
             # Scrape new codes
             scraped_codes = await self.scraper.get_all_codes()
 
@@ -131,7 +137,7 @@ class ShiftCodeBot(commands.Bot):
                     code.code, code.reward, code.expires, code.source
                 )
 
-            # Load from database
+            # Load from database (excludes expired codes)
             self.codes_cache = await self.get_codes_from_db()
             self.last_update = datetime.now()
 
@@ -144,6 +150,11 @@ class ShiftCodeBot(commands.Bot):
         while not self.is_closed():
             try:
                 logger.info("Background: Refreshing shift codes...")
+
+                # First, check for and mark expired codes
+                expired_count = await self.db.update_expired_codes()
+                if expired_count > 0:
+                    logger.info(f"Background: Marked {expired_count} code(s) as expired")
 
                 # Track codes before scraping to detect new ones
                 old_codes = {code.code for code in self.codes_cache}
@@ -162,7 +173,7 @@ class ShiftCodeBot(commands.Bot):
                         new_codes_count += 1
                         new_codes.append(code)
 
-                # Update cache from database
+                # Update cache from database (this now excludes expired codes)
                 self.codes_cache = await self.get_codes_from_db()
                 self.last_update = datetime.now()
 
