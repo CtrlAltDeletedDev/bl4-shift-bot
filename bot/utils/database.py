@@ -120,11 +120,11 @@ class ShiftCodeDatabase:
 
                 await cursor.execute(
                     """
-                    UPDATE codes 
-                    SET last_seen = ?, times_scraped = ?, source = ?
+                    UPDATE codes
+                    SET last_seen = ?, times_scraped = ?, source = ?, reward = ?, expires = ?
                     WHERE id = ?
                 """,
-                    (datetime.now(timezone.utc), times_scraped, source, code_id),
+                    (datetime.now(timezone.utc), times_scraped, source, reward, expires, code_id),
                 )
 
                 # Add to history
