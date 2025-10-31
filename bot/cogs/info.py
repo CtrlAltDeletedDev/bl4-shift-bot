@@ -21,7 +21,7 @@ class InfoCog(commands.Cog, name="Info"):
     @app_commands.command(name="stats")
     async def stats(self, interaction: discord.Interaction):
         """Show bot statistics"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             # Log command usage
@@ -137,7 +137,7 @@ class InfoCog(commands.Cog, name="Info"):
 
         embed.add_field(
             name="📊 Features",
-            value="• 🔄 Auto-updates every 6 hours\n"
+            value="• 🔄 Auto-updates every hour\n"
             "• 💾 Smart caching\n"
             "• 🌐 Multiple sources\n"
             "• ⚡ Fast responses\n"
