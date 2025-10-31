@@ -52,48 +52,66 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.is_owner()
     async def force_refresh(self, ctx):
         """Force refresh shift codes from all sources (Owner only)"""
-        await ctx.send("🔄 Force refreshing shift codes...")
+        # Delete the command message
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass  # Don't fail if we can't delete
+
+        await ctx.author.send("🔄 Force refreshing shift codes...")
 
         try:
             # Update expired codes first
             expired_count = await self.bot.db.update_expired_codes()
             if expired_count > 0:
-                await ctx.send(f"📋 Marked {expired_count} code(s) as expired")
+                await ctx.author.send(f"📋 Marked {expired_count} code(s) as expired")
 
             # Force refresh from sources
             codes = await self.bot.get_codes(force_refresh=True)
 
-            await ctx.send(f"✅ Refreshed! Found {len(codes)} active code(s)")
+            await ctx.author.send(f"✅ Refreshed! Found {len(codes)} active code(s)")
             logger.info(f"Manual force refresh by {ctx.author}")
         except Exception as e:
-            await ctx.send(f"❌ Error refreshing: {e}")
+            await ctx.author.send(f"❌ Error refreshing: {e}")
             logger.error(f"Error in !refresh command: {e}", exc_info=True)
 
     @commands.command(name="sync")
     @commands.is_owner()
     async def sync_commands(self, ctx):
         """Sync slash commands (Owner only)"""
-        await ctx.send("🔄 Syncing slash commands...")
+        # Delete the command message
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass  # Don't fail if we can't delete
+
+        await ctx.author.send("🔄 Syncing slash commands...")
 
         try:
             if self.bot.test_guild:
                 # Sync to test guild
                 self.bot.tree.copy_global_to(guild=self.bot.test_guild)
                 await self.bot.tree.sync(guild=self.bot.test_guild)
-                await ctx.send(f"✅ Synced commands to guild {self.bot.test_guild.id}")
+                await ctx.author.send(f"✅ Synced commands to guild {self.bot.test_guild.id}")
             else:
                 # Sync globally
                 await self.bot.tree.sync()
-                await ctx.send("✅ Synced commands globally (may take up to 1 hour)")
+                await ctx.author.send("✅ Synced commands globally (may take up to 1 hour)")
         except Exception as e:
-            await ctx.send(f"❌ Error syncing: {e}")
+            await ctx.author.send(f"❌ Error syncing: {e}")
             logger.error(f"Error syncing commands: {e}", exc_info=True)
 
     @commands.command(name="shutdown")
     @commands.is_owner()
     async def shutdown_bot(self, ctx):
         """Shutdown the bot (Owner only)"""
-        await ctx.send("👋 Shutting down...")
+        # Delete the command message
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass  # Don't fail if we can't delete
+
+        await ctx.author.send("👋 Shutting down...")
         logger.info(f"Shutdown command issued by {ctx.author}")
         await self.bot.close()
 
@@ -101,26 +119,32 @@ class AdminCog(commands.Cog, name="Admin"):
     @commands.is_owner()
     async def reload_cog(self, ctx, cog_name: str = None):
         """Reload a specific cog or all cogs (Owner only)"""
+        # Delete the command message
+        try:
+            await ctx.message.delete()
+        except discord.Forbidden:
+            pass  # Don't fail if we can't delete
+
         if cog_name:
             # Reload specific cog
             try:
                 await self.bot.reload_extension(f"bot.cogs.{cog_name}")
-                await ctx.send(f"✅ Reloaded cog: {cog_name}")
+                await ctx.author.send(f"✅ Reloaded cog: {cog_name}")
                 logger.info(f"Reloaded cog: {cog_name}")
             except Exception as e:
-                await ctx.send(f"❌ Error reloading {cog_name}: {e}")
+                await ctx.author.send(f"❌ Error reloading {cog_name}: {e}")
                 logger.error(f"Error reloading cog {cog_name}: {e}", exc_info=True)
         else:
             # Reload all cogs
-            await ctx.send("🔄 Reloading all cogs...")
+            await ctx.author.send("🔄 Reloading all cogs...")
             try:
                 for ext in list(self.bot.extensions.keys()):
                     if ext.startswith("bot.cogs."):
                         await self.bot.reload_extension(ext)
-                await ctx.send("✅ All cogs reloaded")
+                await ctx.author.send("✅ All cogs reloaded")
                 logger.info("All cogs reloaded")
             except Exception as e:
-                await ctx.send(f"❌ Error reloading cogs: {e}")
+                await ctx.author.send(f"❌ Error reloading cogs: {e}")
                 logger.error(f"Error reloading cogs: {e}", exc_info=True)
 
 async def setup(bot):
