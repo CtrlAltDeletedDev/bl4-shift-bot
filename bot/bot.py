@@ -40,7 +40,7 @@ class ShiftCodeBot(commands.Bot):
         # Cache for codes
         self.codes_cache = []
         self.last_update = None
-        self.cache_duration = timedelta(hours=6)
+        self.cache_duration = timedelta(hours=1)
 
         # Test guild for faster command syncing
         self.test_guild = test_guild
@@ -99,86 +99,72 @@ class ShiftCodeBot(commands.Bot):
 
         return shift_codes
 
+    async def _refresh_codes_cache(self):
+        """Refresh codes cache by scraping and updating database"""
+        # Check for expired codes first
+        await self.db.update_expired_codes()
+
+        # Scrape new codes
+        scraped_codes = await self.scraper.get_all_codes()
+
+        # Save to database
+        for code in scraped_codes:
+            await self.db.add_or_update_code(
+                code.code, code.reward, code.expires, code.source
+            )
+
+        # Load from database (excludes expired codes)
+        self.codes_cache = await self.get_codes_from_db()
+        self.last_update = datetime.now()
+
     async def get_codes(self, force_refresh: bool = False):
         """Get codes from cache or scrape fresh"""
-        if force_refresh or not self.codes_cache or not self.last_update:
-            logger.info("Fetching fresh codes...")
+        # Refresh if forced, no cache exists, or cache is expired
+        should_refresh = (
+            force_refresh
+            or not self.codes_cache
+            or not self.last_update
+            or datetime.now() - self.last_update > self.cache_duration
+        )
 
-            # Check for expired codes first
-            await self.db.update_expired_codes()
-
-            # Scrape new codes
-            scraped_codes = await self.scraper.get_all_codes()
-
-            # Save to database
-            for code in scraped_codes:
-                await self.db.add_or_update_code(
-                    code.code, code.reward, code.expires, code.source
-                )
-
-            # Load from database (excludes expired codes)
-            self.codes_cache = await self.get_codes_from_db()
-            self.last_update = datetime.now()
-            return self.codes_cache
-
-        # Check if cache is still valid
-        if datetime.now() - self.last_update > self.cache_duration:
-            logger.info("Cache expired, refreshing...")
-
-            # Check for expired codes first
-            await self.db.update_expired_codes()
-
-            # Scrape new codes
-            scraped_codes = await self.scraper.get_all_codes()
-
-            # Save to database
-            for code in scraped_codes:
-                await self.db.add_or_update_code(
-                    code.code, code.reward, code.expires, code.source
-                )
-
-            # Load from database (excludes expired codes)
-            self.codes_cache = await self.get_codes_from_db()
-            self.last_update = datetime.now()
+        if should_refresh:
+            reason = "forced" if force_refresh else "cache expired" if self.last_update else "initial load"
+            logger.info(f"Fetching fresh codes ({reason})...")
+            await self._refresh_codes_cache()
 
         return self.codes_cache
 
     async def update_codes_background(self):
-        """Background task to refresh codes every 6 hours"""
+        """Background task to refresh codes every hour"""
         await self.wait_until_ready()
 
         while not self.is_closed():
             try:
                 logger.info("Background: Refreshing shift codes...")
 
-                # First, check for and mark expired codes
+                # Check for expired codes
                 expired_count = await self.db.update_expired_codes()
                 if expired_count > 0:
                     logger.info(f"Background: Marked {expired_count} code(s) as expired")
-
-                # Track codes before scraping to detect new ones
-                old_codes = {code.code for code in self.codes_cache}
 
                 # Scrape new codes
                 scraped_codes = await self.scraper.get_all_codes()
 
                 # Save to database and track new codes
-                new_codes_count = 0
                 new_codes = []
                 for code in scraped_codes:
                     code_id, is_new = await self.db.add_or_update_code(
                         code.code, code.reward, code.expires, code.source
                     )
                     if is_new:
-                        new_codes_count += 1
                         new_codes.append(code)
 
-                # Update cache from database (this now excludes expired codes)
+                # Update cache from database
                 self.codes_cache = await self.get_codes_from_db()
                 self.last_update = datetime.now()
 
                 logger.info(
-                    f"Background: Cached {len(self.codes_cache)} codes ({new_codes_count} new)"
+                    f"Background: Cached {len(self.codes_cache)} codes ({len(new_codes)} new)"
                 )
 
                 # Send notifications for new codes
@@ -188,8 +174,8 @@ class ShiftCodeBot(commands.Bot):
             except Exception as e:
                 logger.error(f"Background: Error refreshing codes: {e}", exc_info=True)
 
-            # Wait 6 hours before next update
-            await asyncio.sleep(21600)  # 6 hours
+            # Wait 1 hour before next update
+            await asyncio.sleep(3600)  # 1 hour
 
     async def notify_new_codes(self, new_codes: List[ShiftCode]):
         """Send notifications to subscribed channels about new codes"""
@@ -248,7 +234,8 @@ class ShiftCodeBot(commands.Bot):
 
             for sub in subscriptions:
                 try:
-                    channel = self.get_channel(int(sub["channel_id"]))
+                    # Use fetch_channel instead of get_channel for more reliable retrieval
+                    channel = await self.fetch_channel(int(sub["channel_id"]))
                     if channel:
                         await channel.send(embed=embed)
                         success_count += 1
