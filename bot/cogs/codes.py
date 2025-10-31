@@ -24,7 +24,7 @@ class CodesCog(commands.Cog, name="Codes"):
     @app_commands.command(name="codes")
     async def codes(self, interaction: discord.Interaction):
         """Get all available Shift codes with pagination"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             # Log command usage
@@ -37,25 +37,25 @@ class CodesCog(commands.Cog, name="Codes"):
             codes = await self.bot.get_codes()
 
             if not codes:
-                await interaction.followup.send("No Shift codes found at this time.")
+                await interaction.followup.send("No Shift codes found at this time.", ephemeral=True)
                 return
 
             # Create pagination view
             view = CodesPaginationView(codes, page=0, last_update=self.bot.last_update)
             embed = view.get_embed()
 
-            await interaction.followup.send(embed=embed, view=view)
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
         except Exception as e:
             logger.error(f"Error in /codes command: {e}", exc_info=True)
             await interaction.followup.send(
-                "An error occurred while fetching codes. Please try again later."
+                "An error occurred while fetching codes. Please try again later.", ephemeral=True
             )
 
     @app_commands.command(name="latest")
     async def latest(self, interaction: discord.Interaction):
         """Get only the most recent Shift code"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             # Log command usage
@@ -68,7 +68,7 @@ class CodesCog(commands.Cog, name="Codes"):
             codes = await self.bot.get_codes()
 
             if not codes:
-                await interaction.followup.send("No Shift codes found at this time.")
+                await interaction.followup.send("No Shift codes found at this time.", ephemeral=True)
                 return
 
             code = codes[0]
@@ -122,12 +122,12 @@ class CodesCog(commands.Cog, name="Codes"):
                     text=f"Last updated: {self.bot.last_update.strftime('%Y-%m-%d %H:%M:%S UTC')}"
                 )
 
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
         except Exception as e:
             logger.error(f"Error in /latest command: {e}", exc_info=True)
             await interaction.followup.send(
-                "An error occurred while fetching the latest code. Please try again later."
+                "An error occurred while fetching the latest code. Please try again later.", ephemeral=True
             )
 
 
