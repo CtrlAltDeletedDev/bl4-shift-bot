@@ -2,7 +2,8 @@
 Helper utilities for the bot
 """
 
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 
@@ -11,7 +12,7 @@ def check_code_expiration(expires: Optional[str]) -> Tuple[bool, str]:
     Check if a code is expired based on its expiration string.
 
     Args:
-        expires: Expiration string (None, "Never", or date string)
+        expires: Expiration string (None, "Never", date string, or Discord timestamp)
 
     Returns:
         Tuple of (is_expired, emoji)
@@ -27,6 +28,19 @@ def check_code_expiration(expires: Optional[str]) -> Tuple[bool, str]:
     # Check for "never" or similar
     if expires_lower in ["never", "no expiration", "permanent", "n/a", "none"]:
         return False, "✅"
+
+    # Check if it's a Discord timestamp format: <t:1234567890:f>
+    discord_timestamp_match = re.match(r'<t:(\d+):[tTdDfFR]>', expires)
+    if discord_timestamp_match:
+        # Extract epoch timestamp
+        epoch = int(discord_timestamp_match.group(1))
+        expiration_date = datetime.fromtimestamp(epoch, tz=timezone.utc)
+
+        # Compare with current date
+        if expiration_date < datetime.now(timezone.utc):
+            return True, "❌"  # Expired
+        else:
+            return False, "✅"  # Still active
 
     # Try to parse as date
     # Common formats: "2025-12-31", "Dec 31, 2025", "12/31/2025", etc.
