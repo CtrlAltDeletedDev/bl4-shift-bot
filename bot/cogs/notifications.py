@@ -21,7 +21,7 @@ class NotificationsCog(commands.Cog, name="Notifications"):
     @app_commands.command(name="subscribe")
     async def subscribe(self, interaction: discord.Interaction):
         """Subscribe this channel to new code notifications"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             # Log command usage
@@ -31,16 +31,17 @@ class NotificationsCog(commands.Cog, name="Notifications"):
                 str(interaction.guild_id) if interaction.guild else None,
             )
 
-            # Check if user has manage channels permission
-            if (
-                interaction.guild
-                and not interaction.user.guild_permissions.manage_channels
-            ):
-                await interaction.followup.send(
-                    "⛔ You need 'Manage Channels' permission to subscribe to notifications.",
-                    ephemeral=True,
-                )
-                return
+            # Check if user is bot owner or has administrator permission
+            if interaction.guild:
+                is_bot_owner = interaction.user.id == self.bot.owner_id
+                is_admin = interaction.user.guild_permissions.administrator
+
+                if not (is_bot_owner or is_admin):
+                    await interaction.followup.send(
+                        "⛔ You need to be the bot owner or have 'Administrator' permission to subscribe to notifications.",
+                        ephemeral=True,
+                    )
+                    return
 
             # Subscribe the channel
             success = await self.bot.db.add_notification_subscription(
@@ -57,7 +58,7 @@ class NotificationsCog(commands.Cog, name="Notifications"):
                 embed.add_field(
                     name="📬 What you'll get",
                     value="• Automatic alerts for new codes\n"
-                    "• Updates every 6 hours\n"
+                    "• Updates every hour\n"
                     "• Direct redemption links",
                     inline=False,
                 )
@@ -87,7 +88,7 @@ class NotificationsCog(commands.Cog, name="Notifications"):
     @app_commands.command(name="unsubscribe")
     async def unsubscribe(self, interaction: discord.Interaction):
         """Unsubscribe this channel from new code notifications"""
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer(thinking=True, ephemeral=True)
 
         try:
             # Log command usage
@@ -97,16 +98,17 @@ class NotificationsCog(commands.Cog, name="Notifications"):
                 str(interaction.guild_id) if interaction.guild else None,
             )
 
-            # Check if user has manage channels permission
-            if (
-                interaction.guild
-                and not interaction.user.guild_permissions.manage_channels
-            ):
-                await interaction.followup.send(
-                    "⛔ You need 'Manage Channels' permission to unsubscribe from notifications.",
-                    ephemeral=True,
-                )
-                return
+            # Check if user is bot owner or has administrator permission
+            if interaction.guild:
+                is_bot_owner = interaction.user.id == self.bot.owner_id
+                is_admin = interaction.user.guild_permissions.administrator
+
+                if not (is_bot_owner or is_admin):
+                    await interaction.followup.send(
+                        "⛔ You need to be the bot owner or have 'Administrator' permission to unsubscribe from notifications.",
+                        ephemeral=True,
+                    )
+                    return
 
             # Unsubscribe the channel
             success = await self.bot.db.remove_notification_subscription(
